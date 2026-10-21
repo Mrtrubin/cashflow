@@ -3,6 +3,7 @@
 import { apiFetch } from "@/lib/api/client";
 import { authClient } from "@/lib/auth/client";
 import {
+  bumpOutboxAttempts,
   dropOutbox,
   enqueueChanges,
   getDb,
@@ -35,6 +36,8 @@ const LOOKBACK_MS = 5_000;
 const PUSH_BATCH = 200;
 const MAX_PULL_ROUNDS = 10;
 const MAX_PUSH_ROUNDS = 20;
+/** 同一条变更被服务端拒绝的最大次数，超过才丢弃（否则一条坏数据永远卡在队列里） */
+const MAX_ATTEMPTS = 5;
 
 type OutboxEntity = OutboxItem["entity"];
 
@@ -63,10 +66,20 @@ interface PullResponse {
   settings: UserSettings | null;
 }
 
+export interface SyncRejection {
+  entity: string;
+  id: string;
+  reason: string;
+}
+
 export interface SyncOutcome {
   pushed: number;
   pulled: number;
   rejected: number;
+  /** 重试到上限后被放弃的变更数 */
+  dropped: number;
+  /** 被服务端拒绝的原因（最多保留 5 条，用于界面提示） */
+  rejections: SyncRejection[];
   at: string;
 }
 
@@ -99,19 +112,36 @@ async function loadRow(
   }
 }
 
-async function pushOnce(): Promise<{ count: number; rejected: number } | null> {
+interface PushAttempt {
+  /** 本次提交的变更条数（已按实体去重前的队列条数） */
+  count: number;
+  /** 服务端明确拒绝、留在队列里等待重试的条数 */
+  retained: number;
+  /** 重试到上限后被放弃的条数 */
+  dropped: number;
+  rejections: SyncRejection[];
+}
+
+async function pushOnce(): Promise<PushAttempt | null> {
   const items = await takeOutbox(PUSH_BATCH);
   if (items.length === 0) return null;
 
   const db = await getDb();
-  // 同一实体的多次修改合并成一条（以最新一次为准）
+  // 同一实体的多次修改合并成一条（以最新一次为准），并记住每条变更对应的队列序号，
+  // 这样服务端只接收了一部分时，可以精确地只删除已成功的那部分。
   const latest = new Map<string, OutboxItem>();
+  const seqsByKey = new Map<string, number[]>();
   for (const item of items) {
-    latest.set(`${item.entity}:${item.entityId}`, item);
+    const key = `${item.entity}:${item.entityId}`;
+    latest.set(key, item);
+    const seqs = seqsByKey.get(key) ?? [];
+    if (typeof item.seq === "number") seqs.push(item.seq);
+    seqsByKey.set(key, seqs);
   }
 
   const payload: Record<string, unknown> = {};
-  for (const item of latest.values()) {
+  const sent = new Set<string>();
+  for (const [key, item] of latest) {
     if (item.entity === "settings") {
       const row = await db.deviceSettings.get("app");
       payload.settings = row
@@ -121,14 +151,26 @@ async function pushOnce(): Promise<{ count: number; rejected: number } | null> {
             updatedAt: new Date().toISOString(),
           }
         : null;
+      sent.add(key);
       continue;
     }
     const row = await loadRow(item.entity, item.entityId);
     if (!row) continue; // 本机已物理删除，无需上传
-    const key = PAYLOAD_KEY[item.entity];
-    const list = (payload[key] as unknown[] | undefined) ?? [];
+    const payloadKey = PAYLOAD_KEY[item.entity];
+    const list = (payload[payloadKey] as unknown[] | undefined) ?? [];
     list.push(row);
-    payload[key] = list;
+    payload[payloadKey] = list;
+    sent.add(key);
+  }
+
+  // 队列里的行在本机都已不存在：直接出队，不必发请求
+  if (sent.size === 0) {
+    await dropOutbox(
+      items.flatMap(
+        (item) => seqsByKey.get(`${item.entity}:${item.entityId}`) ?? [],
+      ),
+    );
+    return { count: items.length, retained: 0, dropped: 0, rejections: [] };
   }
 
   const result = await apiFetch<PushResponse>("/api/v1/sync/push", {
@@ -136,16 +178,74 @@ async function pushOnce(): Promise<{ count: number; rejected: number } | null> {
     body: JSON.stringify(payload),
   });
 
-  await dropOutbox(
-    items
-      .map((item) => item.seq)
-      .filter((seq): seq is number => typeof seq === "number"),
-  );
-
-  if (result.rejected.length > 0) {
-    console.warn("[sync] 部分变更被服务端拒绝", result.rejected);
+  const applied = new Map<string, Set<string>>();
+  for (const [entity, ids] of Object.entries(result.applied ?? {})) {
+    applied.set(entity, new Set(ids));
   }
-  return { count: items.length, rejected: result.rejected.length };
+  const settingsApplied = (result.applied?.settings ?? []).length > 0;
+
+  const dropSeqs: number[] = [];
+  const retry: Array<{ seq: number; attempts: number }> = [];
+  const rejections: SyncRejection[] = [];
+  let dropped = 0;
+
+  for (const [key, item] of latest) {
+    const seqs = seqsByKey.get(key) ?? [];
+    // 本机没有这一行（上面已跳过）→ 无需保留
+    if (!sent.has(key)) {
+      dropSeqs.push(...seqs);
+      continue;
+    }
+    const ok =
+      item.entity === "settings"
+        ? settingsApplied
+        : (applied.get(PAYLOAD_KEY[item.entity])?.has(item.entityId) ?? false);
+    if (ok) {
+      dropSeqs.push(...seqs);
+      continue;
+    }
+
+    const attempts = (item.attempts ?? 0) + 1;
+    if (attempts >= MAX_ATTEMPTS) {
+      // 重试到上限：丢弃，但把原因交给界面显示，不再静默丢失
+      dropSeqs.push(...seqs);
+      dropped += 1;
+    } else {
+      retry.push(...seqs.map((seq) => ({ seq, attempts })));
+    }
+  }
+
+  const rejectionById = new Map(
+    result.rejected.map((row) => [`${row.entity}:${row.id}`, row]),
+  );
+  for (const item of latest.values()) {
+    const hit = rejectionById.get(
+      `${PAYLOAD_KEY[item.entity]}:${item.entityId}`,
+    );
+    if (hit)
+      rejections.push({ entity: hit.entity, id: hit.id, reason: hit.reason });
+  }
+  // 服务端没给原因（例如整批 200 被网关改写）时，也要让人知道有东西没上去
+  if (rejections.length === 0 && dropped + retry.length > 0) {
+    rejections.push({
+      entity: "unknown",
+      id: "-",
+      reason: "服务端未确认接收，稍后自动重试",
+    });
+  }
+
+  await dropOutbox(dropSeqs);
+  await bumpOutboxAttempts(retry);
+
+  if (rejections.length > 0) {
+    console.warn("[sync] 部分变更未被服务端接收", rejections);
+  }
+  return {
+    count: items.length,
+    retained: retry.length,
+    dropped,
+    rejections,
+  };
 }
 
 interface PullPage {
@@ -277,6 +377,8 @@ async function runSync(): Promise<SyncOutcome> {
     pushed: 0,
     pulled: 0,
     rejected: 0,
+    dropped: 0,
+    rejections: [],
     at: new Date().toISOString(),
   };
 
@@ -286,21 +388,26 @@ async function runSync(): Promise<SyncOutcome> {
   outcome.pulled += await pullAll();
 
   if (firstRun) {
-    const db = await getDb();
-    const hasPending = (await db.outbox.count()) > 0;
-    if (!hasPending && outcome.pulled === 0) {
+    // 云端为空 → 把本机整库（含预设账户、分类和历史记录）一次性推上去。
+    // 这里不能再看 outbox 是否为空：登录前只要记过一笔账，队列就非空，
+    // 旧逻辑会因此跳过整库上传，导致账户/分类永远留在本机。
+    if (outcome.pulled === 0) {
       await enqueueLocalData();
     } else {
+      // 云端已有数据（换设备登录）：只推本机队列里的变更，避免把本机预设灌进已有账号
       await setMeta(BOOTSTRAP_KEY, "1");
     }
   }
 
   for (let round = 0; round < MAX_PUSH_ROUNDS; round += 1) {
-    const pushed = await pushOnce();
-    if (!pushed) break;
-    outcome.pushed += pushed.count;
-    outcome.rejected += pushed.rejected;
-    if (pushed.count < PUSH_BATCH) break;
+    const attempt = await pushOnce();
+    if (!attempt) break;
+    outcome.pushed += attempt.count;
+    outcome.rejected += attempt.rejections.length;
+    outcome.dropped += attempt.dropped;
+    outcome.rejections.push(...attempt.rejections);
+    // 有变更被留在队列里等待重试时立刻收手，否则会拿着同一批数据空转
+    if (attempt.count < PUSH_BATCH || attempt.retained > 0) break;
   }
 
   if (outcome.pushed > 0) {
@@ -319,6 +426,16 @@ export function syncNow(): Promise<SyncOutcome> {
     });
   }
   return running;
+}
+
+/**
+ * 把本机全部数据重新排队上传一次。
+ * 用途：云端数据缺失（早期版本漏传整库）或从备份恢复后，需要主动覆盖云端。
+ */
+export async function resyncAll(): Promise<SyncOutcome> {
+  await enqueueLocalData();
+  await setMeta(BOOTSTRAP_KEY, "1");
+  return syncNow();
 }
 
 export async function pendingCount(): Promise<number> {

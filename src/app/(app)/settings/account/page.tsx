@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { showToast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import { authClient } from "@/lib/auth/client";
-import { pendingCount, type SyncOutcome, syncNow } from "@/lib/sync";
+import { pendingCount, resyncAll, type SyncOutcome, syncNow } from "@/lib/sync";
 
 /** 账号与同步：登录状态、手动同步、退出登录 */
 export default function AccountSettingsPage() {
@@ -27,11 +27,32 @@ export default function AccountSettingsPage() {
       setPending(await pendingCount());
       showToast(
         result.rejected > 0
-          ? `同步完成，${result.rejected} 条被服务端拒绝`
+          ? `同步完成，${result.rejected} 条未上传（见下方原因）`
           : "同步完成",
       );
     } catch (error) {
       showToast(error instanceof Error ? error.message : "同步失败");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function handleResyncAll() {
+    if (
+      !window.confirm(
+        "将把本机全部账户、分类、记录重新上传一次（云端已有的同 id 数据会被本机版本覆盖）。确认继续？",
+      )
+    ) {
+      return;
+    }
+    setSyncing(true);
+    try {
+      const result = await resyncAll();
+      setOutcome(result);
+      setPending(await pendingCount());
+      showToast(`已重新上传 ${result.pushed} 条变更`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "重新上传失败");
     } finally {
       setSyncing(false);
     }
@@ -77,15 +98,35 @@ export default function AccountSettingsPage() {
               <p className="mt-1 text-xs text-muted-foreground">
                 上次同步 {new Date(outcome.at).toLocaleTimeString("zh-CN")}：
                 上传 {outcome.pushed} 条，拉取 {outcome.pulled} 条
+                {outcome.dropped > 0
+                  ? `，${outcome.dropped} 条重试多次仍未成功已放弃`
+                  : ""}
               </p>
+            ) : null}
+            {outcome && outcome.rejections.length > 0 ? (
+              <ul className="mt-2 space-y-1 text-xs text-destructive">
+                {outcome.rejections.slice(0, 5).map((row) => (
+                  <li key={`${row.entity}:${row.id}`}>
+                    {row.entity} {row.id.slice(0, 8)}：{row.reason}
+                  </li>
+                ))}
+              </ul>
             ) : null}
           </div>
 
           <Button variant="outline" onClick={handleSync} disabled={syncing}>
             {syncing ? "同步中…" : "立即同步"}
           </Button>
+          <Button
+            variant="outline"
+            onClick={handleResyncAll}
+            disabled={syncing}
+          >
+            重新上传本机全部数据
+          </Button>
           <p className="text-xs text-muted-foreground">
             账单会先写入本机，联网时自动同步到云端；断网时照常记账。
+            换设备后看不到数据时，先在本机点「重新上传本机全部数据」。
           </p>
           <Button variant="outline" onClick={handleSignOut}>
             退出登录

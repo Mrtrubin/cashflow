@@ -40,6 +40,7 @@
 - Client (`src/lib/repo.ts`, `src/lib/sync.ts`) is an offline cache + UI: it writes IndexedDB first, enqueues an `outbox` item, and syncs through the API. `src/lib/api/client.ts` is the only fetch wrapper.
 - Stats (`src/lib/stats.ts`) stay client-side for offline rendering; they are pure functions over the local ledger.
 - Push order matters: accounts → categories → import batches → transactions → budgets → user settings; ≤200 rows per batch. Rows are applied one-by-one with savepoints, so one bad row doesn't reject the batch.
+- Client outbox rules (`src/lib/sync.ts`): only delete the queue entries the server confirmed in `applied`; rejected rows stay queued (retry, `attempts` capped at 5) instead of being dropped silently. First sync for a device uploads the whole local ledger when the cloud is empty — do not gate that on the outbox being empty, or accounts/categories created before login never leave the device. `resyncAll()` re-queues everything (used by 账号与同步 → 重新上传本机全部数据).
 
 ## Schema conventions (`db/migrations/0001_init.sql`)
 

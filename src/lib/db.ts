@@ -28,6 +28,8 @@ export interface OutboxItem {
   entityId: string;
   op: "upsert" | "delete";
   queuedAt: string;
+  /** 服务端拒绝后的重试次数；达到上限才丢弃，避免一条坏数据卡住整条队列 */
+  attempts?: number;
 }
 
 export interface MetaRow {
@@ -191,6 +193,20 @@ export async function dropOutbox(seqs: number[]): Promise<void> {
   if (seqs.length === 0) return;
   const db = await getDb();
   await db.outbox.bulkDelete(seqs);
+}
+
+/** 服务端拒绝后给队列项累计重试次数（不改变表结构，attempts 只是普通字段） */
+export async function bumpOutboxAttempts(
+  items: Array<{ seq: number; attempts: number }>,
+): Promise<void> {
+  if (items.length === 0) return;
+  const db = await getDb();
+  await db.outbox.bulkUpdate(
+    items.map((item) => ({
+      key: item.seq,
+      changes: { attempts: item.attempts },
+    })),
+  );
 }
 
 export async function pendingEntityIds(
