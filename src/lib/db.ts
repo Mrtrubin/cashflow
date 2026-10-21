@@ -68,6 +68,14 @@ export class CashflowDatabase extends Dexie {
       meta: "key",
       deviceSettings: "key",
     });
+    // v1 漏了 transactions.createdAt 索引，而 listRecentTransactions /
+    // findLastUsage 都按创建时间倒序取数，Dexie 会直接抛
+    // SchemaError: KeyPath createdAt on object store transactions is not indexed。
+    // 未在此列出的表沿用 v1 的定义；改动 transactions 必须写全它的索引列表。
+    this.version(2).stores({
+      transactions:
+        "id, occurredOn, kind, accountId, toAccountId, categoryId, importBatchId, createdAt, [kind+occurredOn]",
+    });
   }
 }
 
