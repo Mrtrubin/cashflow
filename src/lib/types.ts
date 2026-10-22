@@ -61,7 +61,7 @@ export interface Budget {
 
 export interface ImportBatch {
   id: string;
-  source: "text" | "csv";
+  source: "text" | "csv" | "sms";
   total: number;
   imported: number;
   skipped: number;

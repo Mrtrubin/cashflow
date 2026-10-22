@@ -80,7 +80,7 @@ export default function SettingsPage() {
         <EntryLink
           href="/settings/import"
           icon={<FileInput className="size-4" aria-hidden="true" />}
-          label="文本导入"
+          label="导入账单"
         />
         <EntryLink
           href="/settings/data"

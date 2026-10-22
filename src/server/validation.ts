@@ -47,7 +47,7 @@ export const categoryRowSchema = z
 export const importBatchRowSchema = z
   .object({
     id: uuid,
-    source: z.enum(["text", "csv"]),
+    source: z.enum(["text", "csv", "sms"]),
     total: z.number().int().nonnegative(),
     imported: z.number().int().nonnegative(),
     skipped: z.number().int().nonnegative(),

@@ -60,6 +60,14 @@
 - Rows left on the 「其他」 fallback are flagged in the preview with an inline category picker (not blocking). When the user picks a category, the normalized merchant name (`hintKey` in `src/lib/category-hints.ts`) → category id is stored in local meta (`import:categoryHints`) and auto-applied on the next parse — device-local, intentionally not synced.
 - The "生成脚本" tab (`src/components/script-prompt-panel.tsx`) builds a copyable prompt from `src/lib/script-prompt.ts` (system contract + current accounts/categories + bill text); users paste the AI's reply back and `extractScript` strips ``` fences.
 
+## SMS import: local SDK
+
+- `src/lib/sms-sdk/` parses Xiaomi MIUI SMS backups (`.zip` / `.bak` / `ANDROID BACKUP`) entirely in the browser: ZIP → Android Backup tar → `apps/com.android.mms/miui_bak/_tmp_bak` protobuf. It has no server-side counterpart and must stay that way (the backup contains personal messages).
+- `src/lib/sms-sdk/bill-rules.ts` owns bill recognition (ICBC, BOC, Hangzhou Bank, WeChat Pay + generic bank rule). Add new bank formats as a rule there, not in page components.
+- `src/lib/parse-sms.ts` converts `SmsBillTransaction[]` into the existing `ParsedRow` preview via `buildScriptRow`, so category/account matching, hints, duplicate detection and `runImport` are shared with text import.
+- SMS import batches use `source = 'sms'` (`db/migrations/0003_sms_import_source.sql`, client/server unions). Keep the migration append-only and update both zod and TypeScript unions together.
+- The import page has three tabs: 文本导入（脚本）/ 短信导入 / 生成脚本. SMS parsing skips sent messages, verification codes, marketing, statements and phone-bill reminders by default.
+
 ## Product spec
 
 - `docs/需求文档.md` (Chinese) is the authoritative spec: routes, feature priorities (P0/P1/P2), sync protocol, acceptance criteria. Consult it before implementing features.

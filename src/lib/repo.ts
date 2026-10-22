@@ -280,7 +280,7 @@ export interface ImportResult {
 
 /** 执行导入：记录批次，写入记录（导入结果与预览一致） */
 export async function runImport(
-  source: "text" | "csv",
+  source: ImportBatch["source"],
   plans: ImportRowPlan[],
 ): Promise<ImportResult> {
   const db = await getDb();

@@ -25,6 +25,7 @@ import {
   saveRule,
   setActiveRuleId,
 } from "@/lib/parse-rule-store";
+import { buildSmsRows } from "@/lib/parse-sms";
 import {
   buildScriptRow,
   collectLines,
@@ -45,6 +46,7 @@ import {
   undoImportBatch,
 } from "@/lib/repo";
 import { runScriptRule } from "@/lib/script-runner";
+import { extractBillTransactions, parseSmsBackup } from "@/lib/sms-sdk";
 import type {
   Account,
   Category,
@@ -60,7 +62,18 @@ const STATUS_META = {
   error: { icon: "❌", label: "错误" },
 } as const;
 
-type Tab = "import" | "prompt";
+type Tab = "import" | "sms" | "prompt";
+
+type PreviewSource = "text" | "sms";
+
+interface SmsImportInfo {
+  fileName: string;
+  messageCount: number;
+  matched: number;
+  skipped: number;
+  byBank: Record<string, number>;
+  warnings: string[];
+}
 
 type CategoryChoice =
   | { type: "skip" }
@@ -80,13 +93,17 @@ export default function ImportPage() {
   const [activeRuleId, setActiveId] = useState<string | null>(null);
   const [editorRule, setEditorRule] = useState<ParseRule | null>(null);
   const [rows, setRows] = useState<ParsedRow[] | null>(null);
-  const [parsedBy, setParsedBy] = useState<ParseRule | null>(null);
+  const [previewSource, setPreviewSource] = useState<PreviewSource>("text");
+  const [parsedByLabel, setParsedByLabel] = useState<string | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [parseInfo, setParseInfo] = useState<{
     headerSkipped: boolean;
     commentCount: number;
     scriptSkipped: number;
   } | null>(null);
+  const [smsInfo, setSmsInfo] = useState<SmsImportInfo | null>(null);
+  const [smsError, setSmsError] = useState<string | null>(null);
+  const [smsBusy, setSmsBusy] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -163,7 +180,7 @@ export default function ImportPage() {
 
   function resetPreview() {
     setRows(null);
-    setParsedBy(null);
+    setParsedByLabel(null);
     setParseInfo(null);
     setHintApplied(0);
     setCategoryChoices({});
@@ -228,7 +245,9 @@ export default function ImportPage() {
       markDuplicatesAgainstDb(parsedRows, txns);
 
       setRows(parsedRows);
-      setParsedBy(activeRule);
+      setPreviewSource("text");
+      setSmsInfo(null);
+      setParsedByLabel(activeRule.name);
       setHintApplied(applied);
       setTruncated(collected.truncated);
       setParseInfo({
@@ -248,6 +267,59 @@ export default function ImportPage() {
       showToast(error instanceof Error ? error.message : "解析失败");
     } finally {
       setParsing(false);
+    }
+  }
+
+  async function handleSmsFile(file: File) {
+    setSmsError(null);
+    setSmsBusy(true);
+    try {
+      const backup = await parseSmsBackup(file);
+      const result = extractBillTransactions(backup.messages, {
+        includeSent: false,
+        includeWallets: true,
+      });
+      const ctx = {
+        categories,
+        accounts,
+        defaultAccountId,
+        existingTxns: txns,
+      };
+      // 预览从最近一笔开始，和明细页的排序一致
+      const parsedRows = buildSmsRows([...result.transactions].reverse(), ctx);
+      const applied = applyHints(parsedRows, hints, categories);
+      markDuplicatesInText(parsedRows);
+      markDuplicatesAgainstDb(parsedRows, txns);
+
+      setRows(parsedRows);
+      setPreviewSource("sms");
+      setParsedByLabel("短信备份");
+      setSmsInfo({
+        fileName: file.name,
+        messageCount: backup.messages.length,
+        matched: result.matched,
+        skipped: result.skipped,
+        byBank: result.byBank,
+        warnings: backup.warnings,
+      });
+      setHintApplied(applied);
+      setTruncated(false);
+      setParseInfo(null);
+      setCategoryChoices({});
+      setAccountChoices({});
+      setKindChoices({});
+      setKeepDuplicates({});
+
+      if (parsedRows.length === 0) {
+        showToast("没有识别到账单短信，可能备份里只有验证码或通知短信");
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "短信备份解析失败";
+      setSmsError(message);
+      showToast(message);
+    } finally {
+      setSmsBusy(false);
     }
   }
 
@@ -386,7 +458,10 @@ export default function ImportPage() {
         setHints(await loadHints());
       }
 
-      const result = await runImport("text", finalPlans);
+      const result = await runImport(
+        previewSource === "sms" ? "sms" : "text",
+        finalPlans,
+      );
       setLastResult(
         `成功导入 ${result.imported} 条，跳过 ${result.skipped} 条，失败 ${result.failed} 条${
           remembered > 0 ? `；已记住 ${remembered} 个商户的分类` : ""
@@ -430,7 +505,13 @@ export default function ImportPage() {
 
   function handleFile(file: File) {
     const reader = new FileReader();
-    reader.onload = () => setText(String(reader.result ?? ""));
+    reader.onload = () => {
+      setText(String(reader.result ?? ""));
+      setPreviewSource("text");
+      setSmsInfo(null);
+      setSmsError(null);
+      resetPreview();
+    };
     reader.readAsText(file, "utf-8");
   }
 
@@ -470,6 +551,154 @@ export default function ImportPage() {
     resetPreview();
   }
 
+  function renderPreview() {
+    if (!rows) return null;
+    return (
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">
+            预览（{rows.length} 行）
+            {parsedByLabel ? (
+              <span className="ml-1 font-normal text-muted-foreground">
+                · {parsedByLabel}
+              </span>
+            ) : null}
+          </h2>
+          <button
+            type="button"
+            className="text-xs text-muted-foreground"
+            onClick={() => {
+              resetPreview();
+              if (previewSource === "sms") setSmsInfo(null);
+            }}
+          >
+            {previewSource === "sms" ? "重新选择备份" : "重新编辑文本"}
+          </button>
+        </div>
+
+        {previewSource === "sms" && smsInfo ? (
+          <div className="rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+            <p>
+              {smsInfo.fileName} · 读取 {smsInfo.messageCount} 条短信，识别{" "}
+              {smsInfo.matched} 条账单，跳过 {smsInfo.skipped} 条
+            </p>
+            {Object.keys(smsInfo.byBank).length > 0 ? (
+              <p className="mt-0.5">
+                来源：
+                {Object.entries(smsInfo.byBank)
+                  .map(([name, count]) => `${name} ${count}`)
+                  .join(" · ")}
+              </p>
+            ) : null}
+            {smsInfo.warnings.map((warning) => (
+              <p
+                key={warning}
+                className="mt-0.5 text-amber-700 dark:text-amber-400"
+              >
+                {warning}
+              </p>
+            ))}
+          </div>
+        ) : null}
+
+        {truncated ? (
+          <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            超过 2000 行，仅解析前 2000 行，请分批导入
+          </p>
+        ) : null}
+
+        {previewSource === "text" && parseInfo?.headerSkipped ? (
+          <p className="text-xs text-muted-foreground">已跳过首行（表头）</p>
+        ) : null}
+        {previewSource === "text" &&
+        ((parseInfo?.commentCount ?? 0) > 0 ||
+          (parseInfo?.scriptSkipped ?? 0) > 0) ? (
+          <p className="text-xs text-muted-foreground">
+            {(parseInfo?.commentCount ?? 0) > 0
+              ? `已忽略 ${parseInfo?.commentCount} 行注释`
+              : ""}
+            {(parseInfo?.commentCount ?? 0) > 0 &&
+            (parseInfo?.scriptSkipped ?? 0) > 0
+              ? " · "
+              : ""}
+            {(parseInfo?.scriptSkipped ?? 0) > 0
+              ? `${parseInfo?.scriptSkipped} 行被脚本跳过`
+              : ""}
+          </p>
+        ) : null}
+
+        {hintApplied > 0 ? (
+          <p className="text-xs text-muted-foreground">
+            已按记忆套用 {hintApplied} 行分类
+          </p>
+        ) : null}
+
+        <div className="flex gap-2 text-xs text-muted-foreground">
+          <span>✅ {pendingCount.imported} 可导入</span>
+          <span>⚠️ {pendingCount.skipped} 需确认/跳过</span>
+          <span>❌ {pendingCount.failed} 错误</span>
+        </div>
+
+        {otherCount > 0 ? (
+          <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            {otherCount}{" "}
+            行分类是兜底「其他」，导入前建议逐行指定；指定过的商户会记住，下次自动套用。
+          </p>
+        ) : null}
+
+        <div className="flex flex-col divide-y divide-border/60 rounded-xl border border-border">
+          {rows.map((row, index) => (
+            <PreviewRow
+              key={row.lineNo}
+              row={row}
+              willImport={plans?.[index]?.keep ?? false}
+              categories={categories}
+              accounts={accounts}
+              defaultAccountId={defaultAccountId}
+              categoryChoice={categoryChoices[row.lineNo]}
+              accountChoice={accountChoices[row.lineNo]}
+              kindChoice={kindChoices[row.lineNo]}
+              keepDuplicate={keepDuplicates[row.lineNo] ?? false}
+              onCategoryChoice={(choice) =>
+                setCategoryChoices((current) => ({
+                  ...current,
+                  [row.lineNo]: choice,
+                }))
+              }
+              onAccountChoice={(choice) =>
+                setAccountChoices((current) => ({
+                  ...current,
+                  [row.lineNo]: choice,
+                }))
+              }
+              onKindChoice={(kind) =>
+                setKindChoices((current) => ({
+                  ...current,
+                  [row.lineNo]: kind,
+                }))
+              }
+              onKeepDuplicate={(keep) =>
+                setKeepDuplicates((current) => ({
+                  ...current,
+                  [row.lineNo]: keep,
+                }))
+              }
+            />
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={handleImport}
+          disabled={importing || pendingCount.imported === 0}
+          className="min-h-11 rounded-xl bg-primary text-base font-semibold text-primary-foreground disabled:opacity-40"
+        >
+          {importing ? "导入中…" : `导入 ${pendingCount.imported} 条`}
+        </button>
+      </section>
+    );
+  }
+
   if (!ready) {
     return (
       <main className="flex flex-1 items-center justify-center text-muted-foreground">
@@ -489,17 +718,17 @@ export default function ImportPage() {
           >
             <ChevronLeft className="size-5" aria-hidden="true" />
           </Link>
-          <h1 className="text-xl font-semibold">文本导入</h1>
+          <h1 className="text-xl font-semibold">导入</h1>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
-          没有内置格式：解析规则是一段 JS 脚本，可以自己写，也可以让 AI 生成。
+          文本账单用 JS 脚本解析；银行短信可直接导入小米短信备份。
         </p>
       </header>
 
       <div
         role="tablist"
-        aria-label="文本导入"
-        className="grid grid-cols-2 gap-1 rounded-xl bg-muted p-1"
+        aria-label="导入方式"
+        className="grid grid-cols-3 gap-1 rounded-xl bg-muted p-1"
       >
         <button
           type="button"
@@ -518,6 +747,20 @@ export default function ImportPage() {
         <button
           type="button"
           role="tab"
+          aria-selected={tab === "sms"}
+          onClick={() => setTab("sms")}
+          className={cn(
+            "min-h-9 rounded-lg text-sm",
+            tab === "sms"
+              ? "bg-background font-medium shadow-sm"
+              : "text-muted-foreground",
+          )}
+        >
+          短信导入
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={tab === "prompt"}
           onClick={() => setTab("prompt")}
           className={cn(
@@ -531,7 +774,49 @@ export default function ImportPage() {
         </button>
       </div>
 
-      {tab === "prompt" ? (
+      {tab === "sms" ? (
+        <>
+          <section className="flex flex-col gap-3 rounded-xl border border-border p-3">
+            <div>
+              <h2 className="text-sm font-medium">小米短信备份</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                支持小米「短信」本地备份的 .zip 或 .bak 文件。备份只在本机解析，
+                不会上传；只导入银行/支付账单短信，验证码和通知会自动跳过。
+              </p>
+            </div>
+            <label className="flex min-h-11 items-center justify-center rounded-xl border border-dashed border-border px-4 text-sm">
+              {smsBusy ? "正在解析备份…" : "选择短信备份文件"}
+              <input
+                type="file"
+                accept=".zip,.bak,application/zip,application/octet-stream"
+                className="hidden"
+                disabled={smsBusy}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void handleSmsFile(file);
+                  event.target.value = "";
+                }}
+              />
+            </label>
+            {smsError ? (
+              <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {smsError}
+              </p>
+            ) : null}
+            {smsInfo && !rows ? (
+              <p className="text-xs text-muted-foreground">
+                {smsInfo.fileName} · 读取 {smsInfo.messageCount} 条短信，识别{" "}
+                {smsInfo.matched} 条账单
+              </p>
+            ) : null}
+            <p className="text-xs text-muted-foreground">
+              识别规则：工行、中行、杭州银行等银行收支短信，以及微信支付付款/退款。
+              分类先按商户猜一个，导入前可以在预览里改。
+            </p>
+          </section>
+          {previewSource === "sms" ? renderPreview() : null}
+        </>
+      ) : tab === "prompt" ? (
         <ScriptPromptPanel
           text={text}
           onTextChange={setText}
@@ -623,7 +908,7 @@ export default function ImportPage() {
             )}
           </section>
 
-          {rows === null ? (
+          {rows === null || previewSource !== "text" ? (
             <section className="flex flex-col gap-3">
               <textarea
                 value={text}
@@ -662,118 +947,8 @@ export default function ImportPage() {
                 </p>
               ) : null}
             </section>
-          ) : (
-            <section className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold">
-                  预览（{rows.length} 行）
-                  {parsedBy ? (
-                    <span className="ml-1 font-normal text-muted-foreground">
-                      · {parsedBy.name}
-                    </span>
-                  ) : null}
-                </h2>
-                <button
-                  type="button"
-                  className="text-xs text-muted-foreground"
-                  onClick={resetPreview}
-                >
-                  重新编辑文本
-                </button>
-              </div>
-              {truncated ? (
-                <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                  超过 2000 行，仅解析前 2000 行，请分批导入
-                </p>
-              ) : null}
-              {parseInfo?.headerSkipped ||
-              (parseInfo?.commentCount ?? 0) > 0 ||
-              (parseInfo?.scriptSkipped ?? 0) > 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  {parseInfo?.headerSkipped ? "已跳过首行（表头）" : ""}
-                  {parseInfo?.headerSkipped &&
-                  (parseInfo?.commentCount ?? 0) > 0
-                    ? " · "
-                    : ""}
-                  {(parseInfo?.commentCount ?? 0) > 0
-                    ? `已忽略 ${parseInfo?.commentCount} 行注释`
-                    : ""}
-                  {(parseInfo?.scriptSkipped ?? 0) > 0
-                    ? `${parseInfo?.scriptSkipped} 行被脚本跳过`
-                    : ""}
-                </p>
-              ) : null}
-
-              {hintApplied > 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  已按记忆套用 {hintApplied} 行分类
-                </p>
-              ) : null}
-
-              <div className="flex gap-2 text-xs text-muted-foreground">
-                <span>✅ {pendingCount.imported} 可导入</span>
-                <span>⚠️ {pendingCount.skipped} 需确认/跳过</span>
-                <span>❌ {pendingCount.failed} 错误</span>
-              </div>
-
-              {otherCount > 0 ? (
-                <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-                  {otherCount}{" "}
-                  行分类是兜底「其他」，导入前建议逐行指定；指定过的商户会记住，下次自动套用。
-                </p>
-              ) : null}
-
-              <div className="flex flex-col divide-y divide-border/60 rounded-xl border border-border">
-                {rows.map((row, index) => (
-                  <PreviewRow
-                    key={row.lineNo}
-                    row={row}
-                    willImport={plans?.[index]?.keep ?? false}
-                    categories={categories}
-                    accounts={accounts}
-                    defaultAccountId={defaultAccountId}
-                    categoryChoice={categoryChoices[row.lineNo]}
-                    accountChoice={accountChoices[row.lineNo]}
-                    kindChoice={kindChoices[row.lineNo]}
-                    keepDuplicate={keepDuplicates[row.lineNo] ?? false}
-                    onCategoryChoice={(choice) =>
-                      setCategoryChoices((current) => ({
-                        ...current,
-                        [row.lineNo]: choice,
-                      }))
-                    }
-                    onAccountChoice={(choice) =>
-                      setAccountChoices((current) => ({
-                        ...current,
-                        [row.lineNo]: choice,
-                      }))
-                    }
-                    onKindChoice={(kind) =>
-                      setKindChoices((current) => ({
-                        ...current,
-                        [row.lineNo]: kind,
-                      }))
-                    }
-                    onKeepDuplicate={(keep) =>
-                      setKeepDuplicates((current) => ({
-                        ...current,
-                        [row.lineNo]: keep,
-                      }))
-                    }
-                  />
-                ))}
-              </div>
-
-              <button
-                type="button"
-                onClick={handleImport}
-                disabled={importing || pendingCount.imported === 0}
-                className="min-h-11 rounded-xl bg-primary text-base font-semibold text-primary-foreground disabled:opacity-40"
-              >
-                {importing ? "导入中…" : `导入 ${pendingCount.imported} 条`}
-              </button>
-            </section>
-          )}
+          ) : null}
+          {previewSource === "text" ? renderPreview() : null}
 
           {lastResult ? (
             <p
@@ -801,7 +976,11 @@ export default function ImportPage() {
                     <div className="min-w-0 text-sm">
                       <p className="font-medium">
                         {formatDateTime(batch.createdAt)} ·{" "}
-                        {batch.source === "text" ? "文本" : "CSV"}
+                        {batch.source === "sms"
+                          ? "短信"
+                          : batch.source === "text"
+                            ? "文本"
+                            : "CSV"}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         成功 {batch.imported} · 跳过 {batch.skipped} · 失败{" "}
@@ -964,6 +1143,11 @@ function PreviewRow({
             </span>
             {row.note ? (
               <span className="text-muted-foreground">{row.note}</span>
+            ) : null}
+            {row.tags.length > 0 ? (
+              <span className="text-muted-foreground">
+                {row.tags.map((tag) => `#${tag}`).join(" ")}
+              </span>
             ) : null}
           </span>
 
