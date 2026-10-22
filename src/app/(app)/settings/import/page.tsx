@@ -14,7 +14,7 @@ import {
   loadHints,
   saveHints,
 } from "@/lib/category-hints";
-import { todayISO } from "@/lib/date";
+import { formatDateTime, todayISO } from "@/lib/date";
 import { getDb } from "@/lib/db";
 import { formatCents } from "@/lib/money";
 import { createEmptyRule, type ParseRule } from "@/lib/parse-rule";
@@ -479,7 +479,7 @@ export default function ImportPage() {
   }
 
   return (
-    <main className="flex flex-1 flex-col gap-4 px-4 pt-3 pb-6">
+    <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-3 pb-6">
       <header>
         <div className="flex items-center gap-2">
           <Link
@@ -800,7 +800,7 @@ export default function ImportPage() {
                   >
                     <div className="min-w-0 text-sm">
                       <p className="font-medium">
-                        {batch.createdAt.slice(0, 16).replace("T", " ")} ·{" "}
+                        {formatDateTime(batch.createdAt)} ·{" "}
                         {batch.source === "text" ? "文本" : "CSV"}
                       </p>
                       <p className="text-xs text-muted-foreground">
@@ -1009,8 +1009,10 @@ function PreviewRow({
       </div>
 
       {needsKind ? (
-        <div className="flex items-center gap-2 pl-14">
-          <span className="text-xs text-muted-foreground">类型</span>
+        <div className="flex items-center gap-2 pl-16">
+          <span className="w-8 shrink-0 text-xs text-muted-foreground">
+            类型
+          </span>
           <select
             value={kindChoice ?? ""}
             onChange={(event) => {
@@ -1033,8 +1035,10 @@ function PreviewRow({
       ) : null}
 
       {needsCategory ? (
-        <div className="flex items-center gap-2 pl-14">
-          <span className="text-xs text-muted-foreground">分类</span>
+        <div className="flex items-center gap-2 pl-16">
+          <span className="w-8 shrink-0 text-xs text-muted-foreground">
+            分类
+          </span>
           <select
             value={
               categoryChoice
@@ -1075,8 +1079,10 @@ function PreviewRow({
       ) : null}
 
       {needsAccount ? (
-        <div className="flex items-center gap-2 pl-14">
-          <span className="text-xs text-muted-foreground">账户</span>
+        <div className="flex items-center gap-2 pl-16">
+          <span className="w-8 shrink-0 text-xs text-muted-foreground">
+            账户
+          </span>
           <select
             value={
               accountChoice

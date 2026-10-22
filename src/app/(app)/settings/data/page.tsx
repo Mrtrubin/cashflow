@@ -130,7 +130,7 @@ export default function DataSettingsPage() {
     : 0;
 
   return (
-    <main className="flex flex-1 flex-col gap-4 px-4 pt-3 pb-6">
+    <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-3 pb-6">
       <header className="flex items-center gap-2">
         <Link
           href="/settings"
@@ -232,7 +232,7 @@ export default function DataSettingsPage() {
           type="button"
           onClick={handleClearAll}
           disabled={clearText !== "确认"}
-          className="min-h-11 rounded-xl bg-destructive text-sm font-semibold text-white disabled:opacity-40"
+          className="min-h-11 rounded-xl bg-destructive text-sm font-semibold text-white transition-colors disabled:bg-muted disabled:text-muted-foreground"
         >
           清空全部数据
         </button>

@@ -186,7 +186,7 @@ function TransactionForm() {
   }
 
   return (
-    <main className="flex flex-1 flex-col px-4 pt-3">
+    <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-3">
       <header className="flex items-center justify-between pb-3">
         <button
           type="button"

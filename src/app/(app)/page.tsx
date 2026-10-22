@@ -44,7 +44,7 @@ export default function HomePage() {
   }
 
   return (
-    <main className="flex flex-1 flex-col gap-4 px-4 pt-3">
+    <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-3">
       {/* 本月概览（HOME-01）：左右切换月份 */}
       <section aria-label="本月概览">
         <div className="flex items-center justify-center gap-2">

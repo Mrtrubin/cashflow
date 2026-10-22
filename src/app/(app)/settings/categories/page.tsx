@@ -152,7 +152,7 @@ export default function CategoriesSettingsPage() {
     : null;
 
   return (
-    <main className="flex flex-1 flex-col gap-4 px-4 pt-3 pb-6">
+    <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-3 pb-6">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Link
@@ -294,15 +294,17 @@ export default function CategoriesSettingsPage() {
                   >
                     {category.name}
                   </span>
-                  {children.length > 0 ? (
-                    <ChevronRight
-                      className={cn(
-                        "size-4 text-muted-foreground transition-transform",
-                        expanded && "rotate-90",
-                      )}
-                      aria-hidden="true"
-                    />
-                  ) : null}
+                  <span className="flex w-4 shrink-0 justify-center">
+                    {children.length > 0 ? (
+                      <ChevronRight
+                        className={cn(
+                          "size-4 text-muted-foreground transition-transform",
+                          expanded && "rotate-90",
+                        )}
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                  </span>
                 </button>
                 <button
                   type="button"

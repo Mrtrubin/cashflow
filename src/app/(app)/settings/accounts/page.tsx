@@ -158,7 +158,7 @@ export default function AccountsSettingsPage() {
   const editing = editingId ? accounts.find((a) => a.id === editingId) : null;
 
   return (
-    <main className="flex flex-1 flex-col gap-4 px-4 pt-3 pb-6">
+    <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-3 pb-6">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Link

@@ -32,7 +32,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="bg-muted">
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态主题初始化脚本，内容为常量 */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
-        <div className="mx-auto flex min-h-dvh w-full max-w-[480px] flex-col bg-background">
+        <div className="mx-auto flex h-dvh w-full max-w-[480px] flex-col overflow-hidden bg-background">
           {children}
         </div>
         <Toaster />

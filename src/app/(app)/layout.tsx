@@ -6,7 +6,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <>
       <SyncRunner />
-      <div className="flex flex-1 flex-col pb-[calc(6rem+env(safe-area-inset-bottom))]">
+      <div className="flex min-h-0 flex-1 flex-col pb-[calc(6rem+env(safe-area-inset-bottom))]">
         {children}
       </div>
       <MobileTabBar />

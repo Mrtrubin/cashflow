@@ -83,3 +83,10 @@ export function formatDateCn(iso: string): string {
 export function formatYmCn(ym: YearMonth): string {
   return `${ym.year}年${ym.month}月`;
 }
+
+/** 时间戳 → 本地 'YYYY-MM-DD HH:mm'（createdAt 等存的是 UTC，展示必须转本地） */
+export function formatDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso.slice(0, 16).replace("T", " ");
+  return `${toDateISO(date)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}

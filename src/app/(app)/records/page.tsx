@@ -169,13 +169,13 @@ function RecordsContent() {
   }
 
   return (
-    <main className="flex flex-1 flex-col overflow-hidden">
-      <header className="flex items-center justify-between px-4 pb-2 pt-3">
+    <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <header className="flex shrink-0 items-center justify-between px-4 pb-2 pt-3">
         <h1 className="text-xl font-semibold">明细</h1>
       </header>
 
       {/* 顶部汇总（LST-02） */}
-      <div className="grid grid-cols-3 gap-2 px-4 pb-2">
+      <div className="grid shrink-0 grid-cols-3 gap-2 px-4 pb-2">
         <SummaryCard
           label="收入"
           value={summary.income}
@@ -186,13 +186,14 @@ function RecordsContent() {
       </div>
 
       {/* 筛选（LST-03/04/05） */}
-      <div className="flex flex-col gap-2 px-4 pb-2">
+      <div className="relative z-20 flex shrink-0 flex-col gap-2 px-4 pb-2">
         <div className="flex items-center gap-2">
           <select
             value={period}
             onChange={(event) => setPeriod(event.target.value as PeriodKey)}
-            className="min-h-9 rounded-lg border border-border bg-background px-2 text-sm"
+            className="min-h-9 shrink-0 rounded-lg border border-border bg-background px-2 text-sm"
             aria-label="时间筛选"
+            name="period"
           >
             {PERIOD_OPTIONS.map((option) => (
               <option key={option.key} value={option.key}>
@@ -210,7 +211,7 @@ function RecordsContent() {
               >
                 <ChevronLeft className="size-4" aria-hidden="true" />
               </button>
-              <span className="min-w-20 text-center text-sm tabular-nums">
+              <span className="w-16 text-center text-sm tabular-nums">
                 {ymKeyToRange(
                   ymToKey(ymShift(ymOf(todayISO()), monthOffset)),
                 ).from.slice(0, 7)}
@@ -225,44 +226,11 @@ function RecordsContent() {
               </button>
             </div>
           ) : null}
-          <div className="relative flex-1">
-            <Search
-              className="absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <input
-              type="search"
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-              placeholder="搜备注、商户、分类"
-              className="min-h-9 w-full rounded-lg border border-border bg-background pl-8 pr-2 text-sm"
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-lg bg-muted p-0.5">
-            {KIND_OPTIONS.map((option) => (
-              <button
-                key={option.key}
-                type="button"
-                onClick={() => setKindFilter(option.key)}
-                className={cn(
-                  "min-h-8 rounded-md px-3 text-xs font-medium",
-                  kindFilter === option.key
-                    ? "bg-background shadow-sm"
-                    : "text-muted-foreground",
-                )}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
           <button
             type="button"
             onClick={() => setCategoryFilterOpen((open) => !open)}
             className={cn(
-              "min-h-9 rounded-lg border border-border px-3 text-xs",
+              "ml-auto min-h-9 shrink-0 rounded-lg border border-border px-3 text-xs",
               categoryIds.length > 0
                 ? "border-primary text-primary"
                 : "text-muted-foreground",
@@ -270,6 +238,40 @@ function RecordsContent() {
           >
             分类{categoryIds.length > 0 ? ` · ${categoryIds.length}` : ""}
           </button>
+        </div>
+
+        <div className="relative">
+          <Search
+            className="absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <input
+            type="search"
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+            placeholder="搜备注、商户、分类"
+            aria-label="搜索记录"
+            name="keyword"
+            className="min-h-9 w-full rounded-lg border border-border bg-background pl-8 pr-2 text-sm"
+          />
+        </div>
+
+        <div className="grid grid-cols-4 gap-1 rounded-lg bg-muted p-0.5">
+          {KIND_OPTIONS.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              onClick={() => setKindFilter(option.key)}
+              className={cn(
+                "min-h-8 rounded-md text-xs font-medium",
+                kindFilter === option.key
+                  ? "bg-background shadow-sm"
+                  : "text-muted-foreground",
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
 
         {period === "custom" ? (
@@ -293,7 +295,7 @@ function RecordsContent() {
         ) : null}
 
         {categoryFilterOpen ? (
-          <div className="max-h-48 overflow-y-auto rounded-lg border border-border bg-background p-2 text-sm">
+          <div className="absolute inset-x-4 top-full z-30 max-h-64 overflow-y-auto rounded-xl border border-border bg-background p-2 text-sm shadow-lg">
             <button
               type="button"
               onClick={() => setCategoryIds([])}
@@ -375,10 +377,7 @@ function VirtualRows({
   });
 
   return (
-    <div
-      ref={parentRef}
-      className="h-[calc(100dvh-21rem)] overflow-y-auto pb-6"
-    >
+    <div ref={parentRef} className="h-full overflow-y-auto pb-6">
       <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
         {virtualizer.getVirtualItems().map((item) => {
           const row = rows[item.index];

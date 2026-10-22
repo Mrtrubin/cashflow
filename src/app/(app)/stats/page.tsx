@@ -115,7 +115,7 @@ export default function StatsPage() {
     `/records?from=${range.from}&to=${range.to}&kind=${breakdownKind}${categoryId ? `&categoryId=${categoryId}` : ""}`;
 
   return (
-    <main className="flex flex-1 flex-col gap-4 px-4 pt-3 pb-6">
+    <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-3 pb-6">
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">统计</h1>
         <div className="flex rounded-full bg-muted p-1">
@@ -265,7 +265,7 @@ export default function StatsPage() {
                     />
                     <span aria-hidden="true">{share.icon}</span>
                     <span className="flex-1 truncate">{share.name}</span>
-                    <span className="text-xs text-muted-foreground tabular-nums">
+                    <span className="w-10 text-right text-xs text-muted-foreground tabular-nums">
                       {share.ratio}%
                     </span>
                     <span className="w-16 text-right text-xs text-muted-foreground tabular-nums">
@@ -308,7 +308,7 @@ export default function StatsPage() {
                 stroke="var(--muted-foreground)"
                 tickFormatter={(value: number) =>
                   value >= 10000
-                    ? `${Math.round(value / 10000)}w`
+                    ? `${Number((value / 10000).toFixed(1))}万`
                     : String(value)
                 }
               />

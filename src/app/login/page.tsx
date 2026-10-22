@@ -96,7 +96,7 @@ export default function LoginPage() {
 
   if (session?.user) {
     return (
-      <main className="flex flex-1 flex-col gap-6 px-6 py-12">
+      <main className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-6 py-12">
         <header className="flex flex-col gap-2">
           <h1 className="text-2xl font-semibold">已登录</h1>
           <p className="text-sm text-muted-foreground">{session.user.email}</p>
@@ -115,7 +115,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex flex-1 flex-col gap-6 px-6 py-12">
+    <main className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-6 py-12">
       <header className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold">登录 Cashflow</h1>
         <p className="text-sm text-muted-foreground">

@@ -1,7 +1,7 @@
 "use client";
 
 import { Delete } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { evalExpressionCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
@@ -40,6 +40,14 @@ export function AmountKeypad({
     [expression],
   );
   const canSave = evaluated !== null;
+  const displayRef = useRef<HTMLSpanElement>(null);
+
+  // 金额右对齐：表达式超长时滚到最右端，保证刚输入的数字始终可见。
+  // 不传依赖数组：每次渲染后对齐一次，代价只有一次属性赋值。
+  useEffect(() => {
+    const el = displayRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  });
 
   function press(key: (typeof KEYS)[number]) {
     const isOperator = isOperatorChar(key);
@@ -84,7 +92,10 @@ export function AmountKeypad({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex min-h-16 flex-col items-end justify-center gap-1 rounded-xl bg-muted px-4 py-2 text-right">
-        <span className="w-full truncate text-3xl font-semibold tabular-nums">
+        <span
+          ref={displayRef}
+          className="w-full overflow-x-auto whitespace-nowrap text-right text-3xl font-semibold tabular-nums [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
           {expression || "0"}
         </span>
         {expression && isOperatorChar(expression.slice(-1)) ? null : (

@@ -53,7 +53,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <main className="flex flex-1 flex-col gap-5 px-4 pt-3 pb-6">
+    <main className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pt-3 pb-6">
       <header>
         <h1 className="text-xl font-semibold">设置</h1>
       </header>
